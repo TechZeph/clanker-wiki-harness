@@ -1,0 +1,12 @@
+[project]
+name = "clanker-wiki-harness"
+version = "0.1.0"
+description = "Staging and validation harness for Zeph's clanker-vault LLM wiki."
+requires-python = ">=3.11"
+
+[project.scripts]
+clanker-wiki-harness = "clanker_wiki_harness.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
