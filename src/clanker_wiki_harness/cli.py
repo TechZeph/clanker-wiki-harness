@@ -13,10 +13,18 @@ def cmd_validate(args: argparse.Namespace) -> int:
     report = validate_vault(args.vault, args.baseline)
     if report.ok:
         print("OK: vault validation passed")
+        if report.warnings:
+            print("WARNINGS:")
+            for warning in report.warnings:
+                print(f"- {warning}")
         return 0
     print("FAILED: vault validation found issues")
-    for message in report.messages:
-        print(f"- {message}")
+    for error in report.errors:
+        print(f"- {error}")
+    if report.warnings:
+        print("WARNINGS:")
+        for warning in report.warnings:
+            print(f"- {warning}")
     return 1
 
 

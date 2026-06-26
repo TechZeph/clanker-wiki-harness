@@ -73,3 +73,80 @@ def test_detects_missing_page_format(tmp_path):
 
     assert not report.ok
     assert any("missing required page field" in message for message in report.messages)
+
+
+def test_warning_only_report_does_not_fail_validation():
+    from clanker_wiki_harness.validators import ValidationReport
+
+    report = ValidationReport(errors=[], warnings=["advisory issue"])
+
+    assert report.ok
+    assert report.messages == ["advisory issue"]
+
+
+def test_requires_log_update_when_wiki_changes_with_baseline(tmp_path):
+    baseline = make_minimal_vault(tmp_path / "baseline")
+    staged = make_minimal_vault(tmp_path / "staged")
+    (staged / "wiki" / "concept-a.md").write_text(
+        (staged / "wiki" / "concept-a.md").read_text() + "\nNew staged note.\n"
+    )
+
+    report = validate_vault(staged, baseline)
+
+    assert not report.ok
+    assert any("wiki/log.md must be updated" in error for error in report.errors)
+
+
+def test_accepts_wiki_change_when_log_changes_with_baseline(tmp_path):
+    baseline = make_minimal_vault(tmp_path / "baseline")
+    staged = make_minimal_vault(tmp_path / "staged")
+    (staged / "wiki" / "concept-a.md").write_text(
+        (staged / "wiki" / "concept-a.md").read_text() + "\nNew staged note.\n"
+    )
+    (staged / "wiki" / "log.md").write_text(
+        (staged / "wiki" / "log.md").read_text() + "\n## 2026-01-02 — Update\n"
+    )
+
+    report = validate_vault(staged, baseline)
+
+    assert report.ok, report.messages
+
+
+def test_requires_new_source_summary_in_source_index(tmp_path):
+    baseline = make_minimal_vault(tmp_path / "baseline")
+    staged = make_minimal_vault(tmp_path / "staged")
+    (staged / "wiki" / "new-source.md").write_text(
+        "# New Source\n\n"
+        "**Summary**: New source.\n\n"
+        "**Sources**: [raw/source.md](<../raw/source.md>)\n\n"
+        "**Last updated**: 2026-01-02\n\n"
+        "---\n\n"
+    )
+    (staged / "wiki" / "log.md").write_text(
+        (staged / "wiki" / "log.md").read_text() + "\n## 2026-01-02 — Ingest\n"
+    )
+
+    report = validate_vault(staged, baseline)
+
+    assert not report.ok
+    assert any("new source page missing from wiki/index-sources.md" in error for error in report.errors)
+
+
+def test_warns_when_new_durable_page_is_not_indexed(tmp_path):
+    baseline = make_minimal_vault(tmp_path / "baseline")
+    staged = make_minimal_vault(tmp_path / "staged")
+    (staged / "wiki" / "orphan-concept.md").write_text(
+        "# Orphan Concept\n\n"
+        "**Summary**: Orphan.\n\n"
+        "**Sources**: [raw/source.md](<../raw/source.md>)\n\n"
+        "**Last updated**: 2026-01-02\n\n"
+        "---\n\n"
+    )
+    (staged / "wiki" / "log.md").write_text(
+        (staged / "wiki" / "log.md").read_text() + "\n## 2026-01-02 — Update\n"
+    )
+
+    report = validate_vault(staged, baseline)
+
+    assert report.ok, report.messages
+    assert any("new wiki page may need an index entry" in warning for warning in report.warnings)

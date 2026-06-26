@@ -35,7 +35,10 @@ Staging runs should stay outside the live vault. The default staging location is
 From this repo:
 
 ```bash
-# Run tests
+# Run full project verification
+python3 scripts/verify.py
+
+# Or run only the test suite
 python3 -m pytest -q
 
 # Copy live vault into staging
