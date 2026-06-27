@@ -3,11 +3,12 @@ from __future__ import annotations
 import filecmp
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REQUIRED_FIELDS = ("**Summary**:", "**Sources**:", "**Last updated**:")
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
 SOURCE_LINK_RE = re.compile(r"\((?:source:\s*)?\[[^\]]+\]\(<([^>]+)>\)\)")
+MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(<([^>]+)>\)")
 
 
 @dataclass
@@ -71,6 +72,60 @@ def _source_files_changed(staged: Path, baseline: Path) -> list[str]:
 
 def _resolve_source_link(page: Path, target: str) -> Path:
     return (page.parent / target).resolve()
+
+
+def _source_link_targets(text: str) -> list[str]:
+    targets: list[str] = []
+    for line in text.splitlines():
+        if "**Sources**:" in line:
+            targets.extend(match.group(1) for match in MARKDOWN_LINK_RE.finditer(line))
+    for match in SOURCE_LINK_RE.finditer(text):
+        target = match.group(1)
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
+def _validate_source_link(page: Path, vault: Path, rel: str, target: str, errors: list[str], warnings: list[str]) -> None:
+    target_path = Path(target)
+    if target_path.is_absolute():
+        errors.append(f"source link must be relative: {rel} -> {target}")
+        return
+
+    resolved = _resolve_source_link(page, target)
+    try:
+        resolved.relative_to(vault)
+    except ValueError:
+        errors.append(f"source link escapes vault: {rel} -> {target}")
+        return
+
+    if not _is_under_source_root(resolved, vault):
+        errors.append(f"source link must point into raw/ or Clippings/: {rel} -> {target}")
+        return
+
+    if not resolved.exists():
+        errors.append(f"missing source link target: {rel} -> {target}")
+        return
+
+    if not _uses_direct_relative_source_style(target):
+        warnings.append(f"source link should use direct relative raw/ or Clippings/ style: {rel} -> {target}")
+
+
+def _is_under_source_root(path: Path, vault: Path) -> bool:
+    for root_name in ("raw", "Clippings"):
+        try:
+            path.relative_to(vault / root_name)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _uses_direct_relative_source_style(target: str) -> bool:
+    parts = PurePosixPath(target).parts
+    while parts and parts[0] == "..":
+        parts = parts[1:]
+    return bool(parts) and parts[0] in {"raw", "Clippings"}
 
 
 def _wiki_link_present(index_text: str, page: Path, wiki: Path) -> bool:
@@ -155,17 +210,7 @@ def validate_vault(vault: str | Path, baseline: str | Path | None = None) -> Val
             if target not in known_pages:
                 errors.append(f"broken wikilink: {rel} -> [[{target}]]")
 
-        for match in SOURCE_LINK_RE.finditer(text):
-            target = match.group(1)
-            if "../raw/" not in target and "../Clippings/" not in target:
-                continue
-            resolved = _resolve_source_link(page, target)
-            try:
-                resolved.relative_to(vault)
-            except ValueError:
-                errors.append(f"source link escapes vault: {rel} -> {target}")
-                continue
-            if not resolved.exists():
-                errors.append(f"missing source link target: {rel} -> {target}")
+        for target in _source_link_targets(text):
+            _validate_source_link(page, vault, rel, target, errors, warnings)
 
     return ValidationReport(errors=errors, warnings=warnings)

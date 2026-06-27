@@ -150,3 +150,54 @@ def test_warns_when_new_durable_page_is_not_indexed(tmp_path):
 
     assert report.ok, report.messages
     assert any("new wiki page may need an index entry" in warning for warning in report.warnings)
+
+
+def test_rejects_absolute_source_link_paths(tmp_path):
+    vault = make_minimal_vault(tmp_path / "vault")
+    (vault / "wiki" / "concept-a.md").write_text(
+        "# Concept A\n\n"
+        "**Summary**: Concept.\n\n"
+        f"**Sources**: [raw/source.md](<{vault / 'raw' / 'source.md'}>)\n\n"
+        "**Last updated**: 2026-01-01\n\n"
+        "---\n\n"
+        "Concept body links [[source-summary]].\n"
+    )
+
+    report = validate_vault(vault)
+
+    assert not report.ok
+    assert any("source link must be relative" in error for error in report.errors)
+
+
+def test_rejects_source_link_that_resolves_outside_source_roots(tmp_path):
+    vault = make_minimal_vault(tmp_path / "vault")
+    (vault / "wiki" / "concept-a.md").write_text(
+        "# Concept A\n\n"
+        "**Summary**: Concept.\n\n"
+        "**Sources**: [not source](<../AGENTS.md>)\n\n"
+        "**Last updated**: 2026-01-01\n\n"
+        "---\n\n"
+        "Concept body links [[source-summary]].\n"
+    )
+
+    report = validate_vault(vault)
+
+    assert not report.ok
+    assert any("source link must point into raw/ or Clippings/" in error for error in report.errors)
+
+
+def test_warns_for_nonstandard_but_resolving_source_link_style(tmp_path):
+    vault = make_minimal_vault(tmp_path / "vault")
+    (vault / "wiki" / "concept-a.md").write_text(
+        "# Concept A\n\n"
+        "**Summary**: Concept.\n\n"
+        "**Sources**: [raw/source.md](<subdir/../../raw/source.md>)\n\n"
+        "**Last updated**: 2026-01-01\n\n"
+        "---\n\n"
+        "Concept body links [[source-summary]].\n"
+    )
+
+    report = validate_vault(vault)
+
+    assert report.ok, report.messages
+    assert any("source link should use direct relative raw/ or Clippings/ style" in warning for warning in report.warnings)
