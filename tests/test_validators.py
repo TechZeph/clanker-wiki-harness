@@ -132,6 +132,41 @@ def test_requires_new_source_summary_in_source_index(tmp_path):
     assert any("new source page missing from wiki/index-sources.md" in error for error in report.errors)
 
 
+def test_rejects_log_rewrite_instead_of_append(tmp_path):
+    baseline = make_minimal_vault(tmp_path / "baseline")
+    staged = make_minimal_vault(tmp_path / "staged")
+    (staged / "wiki" / "concept-a.md").write_text(
+        (staged / "wiki" / "concept-a.md").read_text() + "\nNew staged note.\n"
+    )
+    (staged / "wiki" / "log.md").write_text("# Wiki Log\n\n## 2026-01-02 — Rewritten\n")
+
+    report = validate_vault(staged, baseline)
+
+    assert not report.ok
+    assert any("wiki/log.md must append to the existing log" in error for error in report.errors)
+
+
+def test_rejects_index_rewrite_that_drops_existing_entries(tmp_path):
+    baseline = make_minimal_vault(tmp_path / "baseline")
+    staged = make_minimal_vault(tmp_path / "staged")
+    (staged / "wiki" / "new-source.md").write_text(
+        "# New Source\n\n"
+        "**Summary**: New source.\n\n"
+        "**Sources**: [raw/source.md](<../raw/source.md>)\n\n"
+        "**Last updated**: 2026-01-02\n\n"
+        "---\n\n"
+    )
+    (staged / "wiki" / "index-sources.md").write_text("# Source Index\n\n- [[new-source]] - new.\n")
+    (staged / "wiki" / "log.md").write_text(
+        (staged / "wiki" / "log.md").read_text() + "\n## 2026-01-02 — Ingest\n"
+    )
+
+    report = validate_vault(staged, baseline)
+
+    assert not report.ok
+    assert any("index file must preserve existing wikilinks" in error for error in report.errors)
+
+
 def test_warns_when_new_durable_page_is_not_indexed(tmp_path):
     baseline = make_minimal_vault(tmp_path / "baseline")
     staged = make_minimal_vault(tmp_path / "staged")
@@ -150,6 +185,23 @@ def test_warns_when_new_durable_page_is_not_indexed(tmp_path):
 
     assert report.ok, report.messages
     assert any("new wiki page may need an index entry" in warning for warning in report.warnings)
+
+
+def test_rejects_placeholder_template_text_in_wiki_page(tmp_path):
+    vault = make_minimal_vault(tmp_path / "vault")
+    (vault / "wiki" / "placeholder-source.md").write_text(
+        "# Placeholder Source\n\n"
+        "**Summary**: One sentence summary.\n\n"
+        "**Sources**: [raw/source.md](<../raw/source.md>)\n\n"
+        "**Last updated**: 2026-01-02\n\n"
+        "---\n\n"
+        "Short body.\n"
+    )
+
+    report = validate_vault(vault)
+
+    assert not report.ok
+    assert any("placeholder/template text" in error for error in report.errors)
 
 
 def test_rejects_absolute_source_link_paths(tmp_path):

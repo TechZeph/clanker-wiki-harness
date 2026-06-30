@@ -9,6 +9,12 @@ REQUIRED_FIELDS = ("**Summary**:", "**Sources**:", "**Last updated**:")
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
 SOURCE_LINK_RE = re.compile(r"\((?:source:\s*)?\[[^\]]+\]\(<([^>]+)>\)\)")
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(<([^>]+)>\)")
+PLACEHOLDER_PHRASES = (
+    "one sentence summary",
+    "short body",
+    "source title",
+    "one-line description",
+)
 
 
 @dataclass
@@ -150,6 +156,43 @@ def _new_wiki_pages(staged: Path, baseline: Path) -> list[Path]:
     return [staged_pages[rel] for rel in sorted(set(staged_pages) - baseline_pages)]
 
 
+def _validate_append_only_log(vault: Path, baseline: Path, wiki_changes: list[str], errors: list[str]) -> None:
+    if "wiki/log.md" not in wiki_changes:
+        return
+    baseline_log = baseline / "wiki" / "log.md"
+    staged_log = vault / "wiki" / "log.md"
+    if not baseline_log.exists() or not staged_log.exists():
+        return
+    baseline_text = baseline_log.read_text(errors="replace")
+    staged_text = staged_log.read_text(errors="replace")
+    if not staged_text.startswith(baseline_text):
+        errors.append("wiki/log.md must append to the existing log instead of rewriting or truncating it")
+
+
+def _validate_index_link_preservation(vault: Path, baseline: Path, wiki_changes: list[str], errors: list[str]) -> None:
+    for rel in wiki_changes:
+        path = PurePosixPath(rel)
+        if len(path.parts) != 2 or path.parts[0] != "wiki" or not path.name.startswith("index") or path.suffix != ".md":
+            continue
+        baseline_index = baseline / rel
+        staged_index = vault / rel
+        if not baseline_index.exists() or not staged_index.exists():
+            continue
+        baseline_links = set(WIKILINK_RE.findall(baseline_index.read_text(errors="replace")))
+        staged_links = set(WIKILINK_RE.findall(staged_index.read_text(errors="replace")))
+        missing = sorted(baseline_links - staged_links)
+        if missing:
+            errors.append(f"index file must preserve existing wikilinks: {rel} missing {', '.join(missing[:10])}")
+
+
+def _validate_content_quality(rel: str, text: str, errors: list[str]) -> None:
+    lowered = text.lower()
+    for phrase in PLACEHOLDER_PHRASES:
+        if phrase in lowered:
+            errors.append(f"placeholder/template text in wiki page: {rel}: {phrase}")
+            return
+
+
 def _validate_baseline_rules(vault: Path, baseline: Path, errors: list[str], warnings: list[str]) -> None:
     for rel in _source_files_changed(vault, baseline):
         errors.append(f"source root changed: {rel}")
@@ -157,6 +200,8 @@ def _validate_baseline_rules(vault: Path, baseline: Path, errors: list[str], war
     wiki_changes = _files_changed_under("wiki", vault, baseline)
     if any(rel != "wiki/log.md" for rel in wiki_changes) and "wiki/log.md" not in wiki_changes:
         errors.append("wiki/log.md must be updated when staged wiki content changes")
+    _validate_append_only_log(vault, baseline, wiki_changes, errors)
+    _validate_index_link_preservation(vault, baseline, wiki_changes, errors)
 
     wiki = vault / "wiki"
     source_index_text = (wiki / "index-sources.md").read_text(errors="replace") if (wiki / "index-sources.md").exists() else ""
@@ -202,6 +247,7 @@ def validate_vault(vault: str | Path, baseline: str | Path | None = None) -> Val
             for field in REQUIRED_FIELDS:
                 if field not in text:
                     errors.append(f"missing required page field: {rel}: {field}")
+            _validate_content_quality(rel, text, errors)
 
         for match in WIKILINK_RE.finditer(text):
             target = match.group(1).strip()

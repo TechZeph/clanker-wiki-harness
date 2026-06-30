@@ -60,7 +60,35 @@ PYTHONPATH=src python3 -m clanker_wiki_harness.cli diff \
   ~/workspace/vaults/clanker-vault \
   /tmp/clanker-wiki-harness/smoke-run/vault \
   --output /tmp/clanker-wiki-harness/smoke-run/diff.md
+
+# Ask Ollama for a validated JSON extraction plan
+PYTHONPATH=src python3 -m clanker_wiki_harness.cli plan \
+  'Clippings/ideas/example.md' \
+  --vault ~/workspace/vaults/clanker-vault \
+  --model gemma3:12b \
+  --attempts 3 \
+  --output /tmp/clanker-wiki-harness/example-plan.json
+
+# Let a local model write markdown into staging, validate, repair, and report a diff
+PYTHONPATH=src python3 -m clanker_wiki_harness.cli ingest-local \
+  'Clippings/ideas/example.md' \
+  --vault ~/workspace/vaults/clanker-vault \
+  --runs-dir /tmp/clanker-wiki-harness \
+  --run-id example-ingest \
+  --model gemma3:12b \
+  --attempts 3
+
+# After reviewing the diff, apply validated staged wiki changes to the live vault
+PYTHONPATH=src python3 -m clanker_wiki_harness.cli apply \
+  /tmp/clanker-wiki-harness/example-ingest/vault \
+  --vault ~/workspace/vaults/clanker-vault
 ```
+
+The `plan` command uses Ollama's HTTP API in JSON mode, extracts a JSON object from wrapped model output when needed, applies limited deterministic repairs for common page-type aliases, retries invalid JSON or contract-invalid plans, then validates the result with the extraction-plan contract.
+
+The `ingest-local` command uses plain markdown sections instead of JSON. The model writes a complete source-summary page plus small `APPEND` snippets for `wiki/index-sources.md` and `wiki/log.md`. The harness applies those edits only to a staging copy, validates the staged vault, feeds validation errors back to the model for repair, and writes a diff report. It does not apply changes to the live vault.
+
+The `apply` command validates the staged vault against the live baseline, refuses removed files or source-root changes, and copies only added/modified `wiki/*.md` files into the live vault.
 
 After installation, replace `PYTHONPATH=src python3 -m clanker_wiki_harness.cli` with:
 
